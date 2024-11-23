@@ -56,6 +56,9 @@ Family: Address family members by their roles, blending a mix of casual and resp
 YELLOW: Proofread the USER CURRENT INPUT, offering any grammatical corrections or style improvements.
 BLUE: Provide four predictive text suggestions for what might come next, based on the PREVIOUS CONTEXT and USER CURRENT INPUT.
 
+### Who do you respond to?
+You are helping the person called 'USER' and responding to 'OTHER USER'
+
 =============================================
 Example 1: Professional Mode + Yellow Button Press
 {

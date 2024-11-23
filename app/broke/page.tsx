@@ -7,29 +7,56 @@ import { Card } from "@/components/ui/card";
 import { ArrowUp, Delete, Keyboard, Lightbulb, Undo2 } from "lucide-react";
 
 const BASE_URL = "http://localhost:8000";
+
+
 let debounceTimeout: NodeJS.Timeout | null = null; // Timeout for debounce
 const DEBOUNCE_DELAY = 300; // Time in milliseconds to wait after typing
 
-const getSuggestions = (text: string, isWordCompletion: boolean): Promise<string[]> => {
-  return new Promise((resolve) => {
-    if (debounceTimeout) {
-      clearTimeout(debounceTimeout);
-    }
 
-    debounceTimeout = setTimeout(async () => {
-      const endpoint = isWordCompletion ? "/suggest_word_completion" : "/suggest_next_word";
-      try {
-        const response = await fetch(`${BASE_URL}${endpoint}`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text }),
-        });
-        const data = await response.json();
-        resolve(data.suggestions);
-      } catch (error) {
-        console.error("Error fetching suggestions:", error);
-        resolve([]);
-      }
+
+
+const getSuggestions = async (text: string, isWordCompletion: boolean): Promise<string[]> => {
+  // Clear the previous debounce timeout if it exists
+    console.log("getSuggestions called with text:", text);
+
+  if (debounceTimeout) {
+    clearTimeout(debounceTimeout);
+  }
+
+  return new Promise((resolve, reject) => {
+    // Set up a new debounce timeout
+    debounceTimeout = setTimeout(() => {
+      const endpoint = isWordCompletion
+        ? "ws://localhost:8000/ws/suggest_word_completion/"
+        : "ws://localhost:8000/ws/suggest_next_word/";
+
+      const ws = new WebSocket(endpoint);
+
+      ws.onopen = () => {
+        console.log(`WebSocket connected to ${endpoint}`);
+        ws.send(JSON.stringify({ text })); // Send the text to the server
+      };
+
+      ws.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+
+        if (data.error) {
+          console.error(`Error from WebSocket (${endpoint}):`, data.error);
+          reject(data.error);
+        } else if (data.suggestions) {
+          resolve(data.suggestions); // Resolve with the suggestions
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error(`WebSocket error (${endpoint}):`, error);
+        reject("WebSocket connection error");
+      };
+
+      ws.onclose = () => {
+        console.log(`WebSocket disconnected from ${endpoint}`);
+        ws.close();
+      };
     }, DEBOUNCE_DELAY);
   });
 };
@@ -82,6 +109,7 @@ const getContextData = async (endpoint: any): Promise<string[]> => {
 type Message = {
   text: string;
   sender: "user" | "other";
+  read: boolean | false;
 };
 
 export default function Component() {
@@ -138,7 +166,7 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
     // Set interval to repeat the keypress
     intervalRef.current = setInterval(() => {
       handleKeyPress(key);
-    }, 2000); // Repeat every 150ms
+    }, 150); // Repeat every 150ms
   };
   
   // Stop repeating the keypress
@@ -155,40 +183,37 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
  
   
   useEffect(() => {
-    let polling = true; // Flag to control polling
-    let currentIndex = lastIndex; // Use a local variable for last index tracking
-    let isLocked = false; // Mutex lock
-  
-    const pollMessages = async () => {
-      if (isLocked) return; // Prevent re-entrance
-      isLocked = true; // Acquire lock
-  
-      try {
-        const response = await fetch(`${BASE_URL}/get_messages/?start_index=${currentIndex}`);
-        const newMessages = await response.json();
-  
-        if (newMessages.length > 0) {
-          setMessages((prevMessages) => [...prevMessages, ...newMessages]);
-          currentIndex += newMessages.length; // Update local index
-          setLastIndex(currentIndex); // Sync with state
-        }
-      } catch (error) {
-        console.error("Error polling messages:", error);
-      } finally {
-        isLocked = false; // Release lock
-      }
-    };
-  
-    const interval = setInterval(() => {
-      if (polling) pollMessages();
-    }, 1000);
-  
-    return () => {
-      polling = false; // Stop polling
-      clearInterval(interval);
-    };
-  }, []); // Remove `lastIndex`
 
+
+    console.log("Broke")
+    const ws = new WebSocket("ws://localhost:8000/ws/get_messages/");
+  
+    ws.onopen = () => {
+      console.log("WebSocket connected");
+    };
+  
+    ws.onmessage = (event) => {
+      const newMessages = JSON.parse(event.data);
+  
+      setMessages((prevMessages) => {
+     
+        return [...prevMessages, ...newMessages];
+      });
+    };
+  
+    ws.onerror = (error) => {
+      console.error("WebSocket error:", error);
+    };
+  
+    ws.onclose = () => {
+      console.log("WebSocket disconnected");
+    };
+  
+    // Cleanup WebSocket on component unmount
+    return () => {
+   
+    };
+  }, []);
 
   // Fetch suggestions (default or lightbulb)
   useEffect(() => {

@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from typing import List
 import asyncio
 from ai import ContextAgent
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 
 app = FastAPI()
 Agent = ContextAgent()
@@ -37,6 +38,88 @@ class SuggestionRequest(BaseModel):
 # Model for updating the context mode
 class ContextModeRequest(BaseModel):
     mode: str
+
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message):
+        for connection in self.active_connections:
+            await connection.send_json(message)
+
+manager = ConnectionManager()
+
+
+@app.websocket("/ws/suggest_next_word/")
+async def websocket_suggest_next_word(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time 'suggest next word' feature.
+    """
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Wait for a message from the client
+            data = await websocket.receive_json()
+            text = data.get("text", "")
+
+            if not text.strip():
+                await websocket.send_json({"error": "Text cannot be empty."})
+                continue
+
+            print("Next word suggestion request:", text)
+
+            # Generate suggestions
+            results = generator(text, max_new_tokens=1, num_return_sequences=3)
+            suggestions = [result['generated_text'][len(text):].strip().split()[0] for result in results]
+
+            # Send suggestions back to the client
+            await websocket.send_json({"suggestions": suggestions})
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        print("WebSocket disconnected: suggest_next_word")
+    except Exception as e:
+        print(f"Error in WebSocket (suggest_next_word): {e}")
+        await websocket.close(code=1011)
+
+
+@app.websocket("/ws/suggest_word_completion/")
+async def websocket_suggest_word_completion(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time word completion suggestions.
+    """
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Wait for a message from the client
+            data = await websocket.receive_json()
+            text = data.get("text", "")
+
+            if not text.strip():
+                await websocket.send_json({"error": "Text cannot be empty."})
+                continue
+
+            print("Word completion request:", text)
+
+            # Generate completions
+            results = generator(text, max_new_tokens=3, num_return_sequences=3)
+            suggestions = [result['generated_text'][len(text):].strip().split()[0] for result in results]
+
+            # Send completions back to the client
+            await websocket.send_json({"suggestions": suggestions})
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        print("WebSocket disconnected: suggest_word_completion")
+    except Exception as e:
+        print(f"Error in WebSocket (suggest_word_completion): {e}")
+        await websocket.close(code=1011)
+
 
 @app.get("/get_context_mode/")
 def get_context_mode():
@@ -115,6 +198,7 @@ async def generate_suggestion(request: SuggestionRequest):
 class Message(BaseModel):
     sender: str  # "user" for current user, "other" for other person
     text: str
+    read: bool = False
 
 class ResponseMessage(BaseModel):
     sender: str
@@ -125,18 +209,40 @@ def send_message(message: Message):
     """
     Adds a new message to the in-memory store.
     """
+    print(message)
     if not message.text.strip():
         raise HTTPException(status_code=400, detail="Message text cannot be empty.")
     messages.append(message)
     return {"status": "Message sent successfully!"}
 
-@app.get("/get_messages/")
-def get_messages(start_index: int = 0):
+@app.websocket("/ws/get_messages/")
+async def websocket_get_messages(websocket: WebSocket):
     """
-    Returns all messages starting from a specific index.
+    WebSocket endpoint for real-time message updates.
+    Sends only unread messages and marks them as read after sending.
     """
-    return messages[start_index:]
 
+    print(messages)
+
+    await manager.connect(websocket)
+    try:
+        while True:
+            # Filter unread messages
+            unread_messages = [message for message in messages if not message.read]
+
+            if unread_messages:
+                # Mark messages as read
+                for message in unread_messages:
+                    message.read = True
+
+                # Send unread messages to the client
+                await websocket.send_json([message.dict() for message in unread_messages])
+
+            # Sleep or wait to simulate periodic updates
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        manager.disconnect(websocket)
+        print("WebSocket disconnected")
 
 # Models
 class LightbulbPayload(BaseModel):
@@ -155,7 +261,6 @@ def handle_lightbulb_click(payload: LightbulbPayload):
     print("Received payload:", payload.dict())
     y = payload.dict()
     x = f"""
-    You are responding to the 'Other User'. You are the 'USER'.
     {{
         "previous_context": "{y['previous_context']}",
         "user_current_input": "{y['user_current_input']}",
@@ -179,7 +284,6 @@ def handle_checkmark_click(payload: LightbulbPayload):
     print("Received payload:", payload.dict())
     y = payload.dict()
     x = f"""
-    You are responding to the 'Other User'. You are the 'USER'.
     {{
         "previous_context": "{y['previous_context']}",
         "user_current_input": "{y['user_current_input']}",
