@@ -1,14 +1,17 @@
 "use client";
 
-import { useState, useEffect } from "react";
+
+import { useState, useEffect, useRef} from "react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { ArrowUp, Delete, Keyboard, Lightbulb, Undo2 } from "lucide-react";
 
+const BASE_URL = "http://localhost:8000";
+
 const getSuggestions = async (text: string, isWordCompletion: boolean): Promise<string[]> => {
   const endpoint = isWordCompletion ? "/suggest_word_completion" : "/suggest_next_word";
   try {
-    const response = await fetch(`http://localhost:8000${endpoint}`, {
+    const response = await fetch(`${BASE_URL}${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
@@ -23,7 +26,7 @@ const getSuggestions = async (text: string, isWordCompletion: boolean): Promise<
 
 const sendMessageAPI = async (sender: string, text: string): Promise<void> => {
   try {
-    await fetch("http://localhost:8000/send_message/", {
+    await fetch(`${BASE_URL}/send_message/`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sender, text }),
@@ -33,20 +36,38 @@ const sendMessageAPI = async (sender: string, text: string): Promise<void> => {
   }
 };
 
-const getLightbulbSuggestions = async (data: any): Promise<string[]> => {
+const getOpenAISuggestions = async (data: any, endpoint:any): Promise<string[]> => {
   try {
-    const response = await fetch("http://localhost:8000/lightbulb_click/", {
+    const response = await fetch(`${BASE_URL}${endpoint}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(data),
     });
     const result = await response.json();
-    return result.suggestions || [];
+    console.log("OpenAI Sggestions received:", result);
+    return result.suggestions;
   } catch (error) {
     console.error("Error fetching lightbulb suggestions:", error);
     return [];
   }
 };
+
+
+const getContextData = async (endpoint: any): Promise<string[]> => {
+  try {
+    const response = await fetch(`${BASE_URL}${endpoint}`, {
+      method: "GET", // Change method to GET
+      headers: { "Content-Type": "application/json" },
+    });
+    const result = await response.json();
+    console.log("OpenAI Suggestions received:", result);
+    return result.contexts; // Assuming the API returns a 'contexts' key
+  } catch (error) {
+    console.error("Error fetching lightbulb suggestions:", error);
+    return [];
+  }
+};
+
 
 type Message = {
   text: string;
@@ -55,17 +76,77 @@ type Message = {
 
 export default function Component() {
   const [input, setInput] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   const [isUpperCase, setIsUpperCase] = useState(false);
   const [isSpecialChar, setIsSpecialChar] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
-  const [useLightbulbSuggestions, setUseLightbulbSuggestions] = useState(false);
-  const [lastIndex, setLastIndex] = useState(0);
 
+  // Light Bulb Button States
+  const [useLightbulbSuggestions, setUseLightbulbSuggestions] = useState(false);
+  const [isLightbulbActive, setIsLightbulbActive] = useState(false);
+
+  //Checkmark button states
+  const [useCheckMarkSuggestion, setUseCheckMarkSuggestions] = useState(false);
+  const [isCheckMarkActive, setisCheckMarkActive] = useState(false);
+
+//Checkmark button states
+const [useCxtMode, setCxtMode] = useState(false);
+const [isCxtModeActive, setCxtModeActive] = useState(false);
+
+
+  const [lastIndex, setLastIndex] = useState(0);
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const updateDeviceType = () => {
+      setIsMobile(window.innerWidth <= 768); // Assuming mobile if width <= 768px
+    };
+
+    updateDeviceType(); // Initial check
+    window.addEventListener("resize", updateDeviceType);
+    return () => window.removeEventListener("resize", updateDeviceType);
+  }, []);
+
+
+
+  // State to manage intervals for key holding
+  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  
+  // Start repeating the keypress
+  const handleKeyPressHold = (key: string) => {
+    // Exceptions for certain keys
+    if (["shift", "send", "✔", "lightbulb"].includes(key.toLowerCase())) {
+      handleKeyPress(key);
+      return;
+    }
+  
+    // Trigger initial keypress immediately
+    handleKeyPress(key);
+  
+    // Set interval to repeat the keypress
+    intervalRef.current = setInterval(() => {
+      handleKeyPress(key);
+    }, 150); // Repeat every 150ms
+  };
+  
+  // Stop repeating the keypress
+  const handleKeyRelease = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+  };
+
+  const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setInput(e.target.value);
+  };
+ 
+  
   // Poll messages from the backend
   useEffect(() => {
     const pollMessages = async () => {
-      const response = await fetch(`http://localhost:8000/get_messages/?start_index=${lastIndex}`);
+      const response = await fetch(`${BASE_URL}/get_messages/?start_index=${lastIndex}`);
       const newMessages = await response.json();
       if (newMessages.length > 0) {
         setMessages((prevMessages) => [...prevMessages, ...newMessages]);
@@ -90,13 +171,126 @@ export default function Component() {
     }
   }, [input, useLightbulbSuggestions]);
 
+
+
+
+
+  
+  const handleCheckMarkClick = async () => {
+    console.log("Checkmark clicked. Current Checkmark mode:", useCheckMarkSuggestion);
+  
+    if (useCheckMarkSuggestion) {
+      // Turn off lightbulb suggestions and enable default suggestions
+      setUseCheckMarkSuggestions(false);
+      setSuggestions([]); // Clear suggestionsa
+      setisCheckMarkActive(false);
+      console.log("Checkmark mode deactivated. Default suggestions re-enabled.");
+      return;
+    }
+
+     // Prepare data for API
+     const previousContext = messages
+     .map((message) => `${message.sender === "user" ? "You" : "Other"}: ${message.text}`)
+     .join(" ");
+ 
+   const data = {
+     previous_context: previousContext,
+     user_current_input: input,
+     context_mode: "",
+     button_press: "Yellow",
+     suggestions: [],
+   };
+ 
+   console.log("Sending data to Checkmark API:", data);
+ 
+   try {
+     // Call lightbulb API and wait for response
+     const newSuggestions = await getOpenAISuggestions(data,"/checkmark_click/");
+     
+ 
+     if (newSuggestions && newSuggestions.length > 0) {
+       console.log("Lightbulb suggestions received:", newSuggestions);
+       setUseCheckMarkSuggestions(true); // Enable lightbulb mode
+       setSuggestions(newSuggestions);  // Update suggestions in UI
+     } else {
+       console.warn("Lightbulb API returned an empty or invalid response:", newSuggestions);
+       setSuggestions([]); // Clear suggestions if API returns no results
+       setisCheckMarkActive(false);
+     }
+   } catch (error) {
+     console.error("Error fetching lightbulb suggestionchecks:", error);
+     setSuggestions([]); // Clear suggestions on error
+     setisCheckMarkActive(false);
+   }
+ };
+
+ const setContextMode = async (selectedContext) => {
+  try {
+    const response = await fetch(`${BASE_URL}/set_context_mode/`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: selectedContext }),
+    });
+
+    if (!response.ok) {
+      console.error("Failed to set context mode:", response.statusText);
+      return null;
+    }
+
+    const result = await response.json();
+    console.log("Context mode updated successfully:", result);
+    return result.new_context_mode; // Return the updated context mode
+  } catch (error) {
+    console.error("Error setting context mode:", error);
+    return null;
+  }
+};
+
+
+ const handleContextClick = async () => {
+
+  console.log("Context Mode clicked. Current Mode:", useCxtMode);
+  
+  if (useCxtMode) {
+    setCxtMode(false);
+    setSuggestions([]); // Clear suggestionsa
+    setCxtModeActive(false);
+    console.log("Checkmark mode deactivated. Default suggestions re-enabled.");
+    return;
+  }
+
+ try {
+   // Call lightbulb API and wait for response
+   const newSuggestions = await getContextData("/get_context_mode/");
+   
+
+   if (newSuggestions && newSuggestions.length > 0) {
+     console.log("Context modes received:", newSuggestions);
+     setCxtMode(true); // Enable lightbulb mode
+     setSuggestions(newSuggestions);  // Update suggestions in UI
+   } else {
+     console.warn("Lightbulb API returned an empty or invalid response:", newSuggestions);
+     setSuggestions([]); // Clear suggestions if API returns no results
+     setCxtModeActive(false);
+   }
+ } catch (error) {
+   console.error("Error fetching Context Modes:", error);
+   setSuggestions([]); // Clear suggestions on error
+   setCxtModeActive(false);
+ }
+
+ };
+  
+
+
   const handleLightbulbClick = async () => {
     console.log("Lightbulb clicked. Current lightbulb mode:", useLightbulbSuggestions);
   
     if (useLightbulbSuggestions) {
       // Turn off lightbulb suggestions and enable default suggestions
       setUseLightbulbSuggestions(false);
-      setSuggestions([]); // Clear suggestions
+      setSuggestions([]); // Clear suggestionsa
+      setIsLightbulbActive(false);
       console.log("Lightbulb mode deactivated. Default suggestions re-enabled.");
       return;
     }
@@ -118,7 +312,8 @@ export default function Component() {
   
     try {
       // Call lightbulb API and wait for response
-      const newSuggestions = await getLightbulbSuggestions(data);
+      const newSuggestions = await getOpenAISuggestions(data,"/lightbulb_click/");
+      
   
       if (newSuggestions && newSuggestions.length > 0) {
         console.log("Lightbulb suggestions received:", newSuggestions);
@@ -127,46 +322,83 @@ export default function Component() {
       } else {
         console.warn("Lightbulb API returned an empty or invalid response:", newSuggestions);
         setSuggestions([]); // Clear suggestions if API returns no results
+        setIsLightbulbActive(false);
       }
     } catch (error) {
       console.error("Error fetching lightbulb suggestions:", error);
       setSuggestions([]); // Clear suggestions on error
+      setIsLightbulbActive(false);
     }
   };
 
+
   const handleKeyPress = (key: string) => {
+    const cursorPosition = inputRef.current?.selectionStart || 0;
+  
     if (key === "backspace") {
-      setInput(input.slice(0, -1));
+      if (cursorPosition > 0) {
+        const newInput =
+          input.slice(0, cursorPosition - 1) + input.slice(cursorPosition);
+        setInput(newInput);
+  
+        // Restore the cursor position
+        setTimeout(() => {
+          inputRef.current?.setSelectionRange(cursorPosition - 1, cursorPosition - 1);
+        });
+      }
     } else if (key === "undo") {
       setInput(input.slice(0, -1));
     } else if (key === "space") {
-      setInput(input + " ");
+      const newInput =
+        input.slice(0, cursorPosition) + " " + input.slice(cursorPosition);
+      setInput(newInput);
+  
+      // Restore the cursor position
+      setTimeout(() => {
+        inputRef.current?.setSelectionRange(cursorPosition + 1, cursorPosition + 1);
+      });
     } else if (key === "send") {
       if (input.trim()) {
         sendMessageAPI("user", input.trim());
         setInput("");
       }
-    } else {
-      setInput(input + (isUpperCase ? key.toUpperCase() : key));
+    } else if (key === "✔") {
+      handleCheckMarkClick();
+    } else if (key === "👥") {
+      handleContextClick();
+    }   
+
+    else {
+      const newInput =
+        input.slice(0, cursorPosition) +
+        (isUpperCase ? key.toUpperCase() : key) +
+        input.slice(cursorPosition);
+      setInput(newInput);
+  
+      // Restore the cursor position
+      setTimeout(() => {
+        inputRef.current?.setSelectionRange(cursorPosition + 1, cursorPosition + 1);
+      });
     }
   };
 
   const numberKeys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
   const letterKeys = [
-    ["q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
+    ["✔","q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
     ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
     ["shift", "z", "x", "c", "v", "b", "n", "m", "backspace"],
-    ["123", "space", "send"],
+    ["123",":", "space", ".", "👥","↩ "],
   ];
   const specialKeys = [
+    ["+", "×", "÷", "=", "/", "_", "<", ">", "[", "]"],
     ["!", "@", "#", "$", "%", "^", "&", "*", "(", ")"],
-    ["-", "_", "+", "=", "{", "}", "[", "]", "|", "\\"],
-    [".", ",", "?", ":", ";", "undo", "backspace"],
-    ["abc", "space", "send"],
+    ["-", "'", "", ":", ";", ",", "?", "backspace"],
+    ["abc", ":", "space", ".", "👥", "↩"],
   ];
 
   const keys = isSpecialChar ? specialKeys : letterKeys;
 
+  
   return (
     <Card className="w-full max-w-lg mx-auto h-screen flex flex-col justify-between bg-white shadow-lg md:max-w-3xl">
       <div className="flex-grow h-1/2 overflow-y-auto p-4 bg-gray-100">
@@ -182,33 +414,69 @@ export default function Component() {
           </div>
         ))}
       </div>
-      <div className="p-2 bg-gray-200 border-t border-gray-300">
-        <input
-          type="text"
-          value={input}
-          readOnly
-          className="w-full p-2 rounded-md bg-white focus:outline-none"
-          placeholder="Type a message..."
-        />
-      </div>
-      <div className="flex flex-wrap gap-2 justify-around p-2 bg-gray-300">
-  {suggestions.map((suggestion, index) => (
-    <Button
-      key={index}
-      variant="secondary"
-      className="text-sm md:text-base px-2 py-1 max-w-xs break-words truncate"
-      onClick={() => setInput(input + suggestion + " ")}
-      title={suggestion} // Tooltip for full suggestion
-    >
-      {suggestion}
-    </Button>
-  ))}
-</div>
+
+         {/* Input Section */}
+         <div className="p-2 bg-gray-200 border-t border-gray-300">
+             <div className="flex items-center bg-white rounded-md p-1 shadow-sm">
+               {/* Input Field */}
+               <textarea
+                 type="text"
+                 value={input}
+                 onChange={(e) => setInput(e.target.value)}
+                 ref={inputRef}
+                 className="flex-grow p-2 rounded-l-md bg-white focus:outline-none text-sm resize-none max-h-24 overflow-y-auto"
+                 placeholder="Type a message..."
+                 autoFocus
+               />
+                {/* Send Button */}
+               <button
+                 onClick={() => {
+                   if (input.trim()) {
+                     sendMessageAPI("user", input.trim());
+                     setInput("");
+                   }
+                 }}
+                 className="ml-2 bg-blue-500 text-white p-2 rounded-md hover:bg-blue-600 focus:outline-none"
+                 style={{ height: "100%" }}
+               >
+                 {/* Paper Plane Icon */}
+                 <svg
+                   xmlns="http://www.w3.org/2000/svg"
+                   className="h-5 w-5"
+                   fill="currentColor"
+                   viewBox="0 0 24 24"
+                 >
+                   <path
+                     fillRule="evenodd"
+                     d="M2.707 12.293a1 1 0 01.083-1.32l.094-.083 17-9a1 1 0 011.32 1.497l-.094.083L7.413 11H20a1 1 0 01.993.883L21 12a1 1 0 01-.883.993L20 13H7.413l13.698 7.583a1 1 0 01-1.216 1.616l-.094-.055-17-9a1 1 0 01-.083-1.32l.094-.083-.094.083z"
+                     clipRule="evenodd"
+                   />
+                 </svg>
+               </button>
+             </div>
+           </div>
+
+
+     {/* Suggestions Section */}
+           <div className="flex gap-2 justify-around p-2 bg-gray-300 overflow-x-auto no-scrollbar">
+             {suggestions.map((suggestion, index) => (
+               <div
+                 key={index}
+                 className="text-sm px-2 py-1 max-w-xs bg-white border rounded shadow-md overflow-x-auto whitespace-nowrap cursor-text"
+                 style={{ display: "inline-block" }}
+                 title={suggestion}
+                 onClick={() => setInput(input + suggestion + " ")}
+               >
+                 {suggestion}
+               </div>
+             ))}
+           </div>
+            {/* Keyboard Section */}
       <div className="bg-gray-200 p-1">
         <div className="flex justify-between mb-1">
           <Button
             variant="secondary"
-            className="w-10 h-10 md:w-12 md:h-12 text-sm md:text-base font-medium"
+            className="flex-grow p-2 rounded-l-md bg-white focus:outline-none text-sm resize-none max-h-24 overflow-y-auto"
             onClick={handleLightbulbClick}
           >
             <Lightbulb className="w-4 h-4 md:w-5 md:h-5" />
@@ -217,7 +485,7 @@ export default function Component() {
             <Button
               key={key}
               variant="secondary"
-              className="w-8 h-10 md:w-10 md:h-12 text-sm md:text-base font-medium"
+              className="flex-grow p-2 rounded-l-md bg-white focus:outline-none text-sm resize-none max-h-24 overflow-y-auto"
               onClick={() => handleKeyPress(key)}
             >
               {key}
@@ -236,8 +504,8 @@ export default function Component() {
                     : key === "shift" || key === "backspace" || key === "undo"
                     ? "w-12 md:w-16"
                     : key === "123" || key === "send" || key === "abc"
-                    ? "w-16 md:w-20"
-                    : "w-8 md:w-10"
+                    ? "flex-grow p-2 rounded-l-md bg-white focus:outline-none text-sm resize-none max-h-24 overflow-y-auto"
+                    : "flex-grow p-2 rounded-l-md bg-white focus:outline-none text-sm resize-none max-h-24 overflow-y-auto"
                 } h-10 md:h-12 text-sm md:text-base font-medium`}
                 onClick={() => {
                   if (key === "shift") {

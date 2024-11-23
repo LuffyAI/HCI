@@ -1,6 +1,6 @@
 import requests
 
-BASE_URL = "http://localhost:8000"
+BASE_URL = "http://45.76.22.199:8000"
 
 def send_message(sender: str, text: str):
     """
@@ -16,6 +16,7 @@ def send_message(sender: str, text: str):
             print(f"Error: {response.json().get('detail', 'Unknown error')}")
     except Exception as e:
         print(f"An error occurred: {e}")
+        
 
 def get_messages():
     """
@@ -35,6 +36,20 @@ def get_messages():
     except Exception as e:
         print(f"An error occurred: {e}")
 
+def delete_all_messages():
+    """
+    Deletes all messages from the FastAPI server.
+    """
+    url = f"{BASE_URL}/delete_messages/"
+    try:
+        response = requests.delete(url)
+        if response.status_code == 200:
+            print(response.json().get("status", "Messages deleted successfully!"))
+        else:
+            print(f"Error: {response.json().get('detail', 'Unknown error')}")
+    except Exception as e:
+        print(f"An error occurred: {e}")
+
 def main():
     """
     Main function to provide terminal interface.
@@ -44,7 +59,8 @@ def main():
         print("\nOptions:")
         print("1. Send a message as 'Other User'")
         print("2. View all messages")
-        print("3. Exit")
+        print("3. Delete")
+        print("4. Exit")
         choice = input("Enter your choice (1/2/3): ").strip()
         
         if choice == "1":
@@ -53,7 +69,8 @@ def main():
         elif choice == "2":
             get_messages()
         elif choice == "3":
-            print("Goodbye!")
+            delete_all_messages()
+        elif choice == "4":
             break
         else:
             print("Invalid choice. Please try again.")

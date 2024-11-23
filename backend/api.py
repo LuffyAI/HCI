@@ -25,8 +25,42 @@ app.add_middleware(
 
 generator = pipeline("text-generation", model="gpt2-medium")
 
+# In-memory storage for messages
+messages = []
+subscribers = []  # List of active connections
+context_mode = "Family"  # Default context mode
+
+
 class SuggestionRequest(BaseModel):
     text: str
+
+# Model for updating the context mode
+class ContextModeRequest(BaseModel):
+    mode: str
+
+@app.get("/get_context_mode/")
+def get_context_mode():
+    """
+    Returns the current context mode as the first element in the list of contexts.
+    """
+    all_contexts = ["Family", "Professional", "Friends"]
+
+    # Ensure the current context mode is the first element
+    contexts = [context_mode] + [ctx for ctx in all_contexts if ctx != context_mode]
+
+    return {"contexts": contexts}
+
+
+@app.post("/set_context_mode/")
+def set_context_mode(request: ContextModeRequest):
+    """
+    Sets a new context mode.
+    """
+    global context_mode
+    if not request.mode.strip():
+        raise HTTPException(status_code=400, detail="Context mode cannot be empty.")
+    context_mode = request.mode
+    return {"status": "Context mode updated successfully!", "new_context_mode": context_mode}
 
 # Endpoint for suggesting the next word in context
 @app.post("/suggest_next_word")
@@ -37,6 +71,15 @@ async def suggest_next_word(request: SuggestionRequest):
     results = generator(request.text, max_new_tokens=1, num_return_sequences=3)
     suggestions = [result['generated_text'][len(request.text):].strip().split()[0] for result in results]
     return {"suggestions": suggestions}
+
+@app.delete("/delete_messages/")
+def delete_messages():
+    """
+    Deletes all messages from the in-memory store.
+    """
+    global messages
+    messages.clear()
+    return {"status": "All messages have been deleted successfully!"}
 
 # Endpoint for suggesting word completions
 @app.post("/suggest_word_completion")
@@ -67,10 +110,6 @@ async def generate_suggestion(request: SuggestionRequest):
     except Exception as e:
         return {"error": str(e)}
 
-# In-memory storage for messages
-# In-memory storage for messages
-messages = []
-subscribers = []  # List of active connections
 
 # Models
 class Message(BaseModel):
@@ -111,7 +150,7 @@ class LightbulbPayload(BaseModel):
 def handle_lightbulb_click(payload: LightbulbPayload):
     """
     Handles the lightbulb click and processes the payload.
-    For now, returns arbitrary data.
+    Calls OpenAI to simulate the contextually aware responses.
     """
     print("Received payload:", payload.dict())
     y = payload.dict()
@@ -119,9 +158,34 @@ def handle_lightbulb_click(payload: LightbulbPayload):
     {{
         "previous_context": "{y['previous_context']}",
         "user_current_input": "{y['user_current_input']}",
-        "context_mode": "Family",
+        "context_mode": "{context_mode}",
         "button_press": "Blue",
         "suggestions": []
     }}
     """    
-    return {"suggestions": Agent.infer(x)}
+    payload = {"suggestions": Agent.infer(x)}
+    print("Payload:", payload)
+    return payload 
+
+
+
+@app.post("/checkmark_click/")
+def handle_checkmark_click(payload: LightbulbPayload):
+    """
+    Handles the checkmark click and processes the payload.
+    Calls OpenAI to simulate the contextually aware responses.
+    """
+    print("Received payload:", payload.dict())
+    y = payload.dict()
+    x = f"""
+    {{
+        "previous_context": "{y['previous_context']}",
+        "user_current_input": "{y['user_current_input']}",
+        "context_mode": "{context_mode}",
+        "button_press": "Yellow",
+        "suggestions": []
+    }}
+    """    
+    payload = {"suggestions": Agent.infer(x)}
+    print("Payload:", payload)
+    return payload 
