@@ -81,6 +81,7 @@ export default function Component() {
   const [isUpperCase, setIsUpperCase] = useState(false);
   const [isSpecialChar, setIsSpecialChar] = useState(false);
   const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [selectedContext, setSelectedContext] = useState<string | null>(null);
 
   // Light Bulb Button States
   const [useLightbulbSuggestions, setUseLightbulbSuggestions] = useState(false);
@@ -143,20 +144,41 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
   };
  
   
-  // Poll messages from the backend
   useEffect(() => {
+    let polling = true; // Flag to control polling
+    let currentIndex = lastIndex; // Use a local variable for last index tracking
+  
     const pollMessages = async () => {
-      const response = await fetch(`${BASE_URL}/get_messages/?start_index=${lastIndex}`);
-      const newMessages = await response.json();
-      if (newMessages.length > 0) {
-        setMessages((prevMessages) => [...prevMessages, ...newMessages]);
-        setLastIndex((prevIndex) => prevIndex + newMessages.length);
+      try {
+        const response = await fetch(`${BASE_URL}/get_messages/?start_index=${currentIndex}`);
+        const newMessages = await response.json();
+  
+        if (newMessages.length > 0) {
+          setMessages((prevMessages) => {
+            // Ensure no duplicates by filtering new messages
+            const uniqueMessages = newMessages.filter(
+              (newMsg) => !prevMessages.some((msg) => msg.text === newMsg.text && msg.sender === newMsg.sender)
+            );
+            return [...prevMessages, ...uniqueMessages];
+          });
+  
+          currentIndex += newMessages.length; // Update local index
+          setLastIndex(currentIndex); // Sync with state
+        }
+      } catch (error) {
+        console.error("Error polling messages:", error);
       }
     };
-
-    const interval = setInterval(pollMessages, 1000);
-    return () => clearInterval(interval);
-  }, [lastIndex]);
+  
+    const interval = setInterval(() => {
+      if (polling) pollMessages();
+    }, 1000);
+  
+    return () => {
+      polling = false; // Stop polling
+      clearInterval(interval);
+    };
+  }, []); // Remove `lastIndex`
 
   // Fetch suggestions (default or lightbulb)
   useEffect(() => {
@@ -239,6 +261,7 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
 
     const result = await response.json();
     console.log("Context mode updated successfully:", result);
+    setCxtMode(false);
     return result.new_context_mode; // Return the updated context mode
   } catch (error) {
     console.error("Error setting context mode:", error);
@@ -366,6 +389,8 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
       handleCheckMarkClick();
     } else if (key === "👥") {
       handleContextClick();
+
+
     }   
 
     else {
@@ -381,6 +406,22 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
       });
     }
   };
+
+  useEffect(() => {
+    if (useCxtMode) {
+      // Fetch context-specific suggestions
+      getContextData("/get_context_mode/").then(setSuggestions);
+    } else if (input) {
+      // Fetch default suggestions if context mode is inactive
+      const isWordCompletion = input[input.length - 1] !== " ";
+      const contextText = isWordCompletion
+        ? input.split(" ").slice(-15).join(" ")
+        : input.trim();
+      getSuggestions(contextText, isWordCompletion).then(setSuggestions);
+    } else {
+      setSuggestions([]); // Clear suggestions if input is empty
+    }
+  }, [input, useCxtMode]);
 
   const numberKeys = ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0"];
   const letterKeys = [
@@ -458,19 +499,42 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
 
 
      {/* Suggestions Section */}
-           <div className="flex gap-2 justify-around p-2 bg-gray-300 overflow-x-auto no-scrollbar">
-             {suggestions.map((suggestion, index) => (
-               <div
-                 key={index}
-                 className="text-sm px-2 py-1 max-w-xs bg-white border rounded shadow-md overflow-x-auto whitespace-nowrap cursor-text"
-                 style={{ display: "inline-block" }}
-                 title={suggestion}
-                 onClick={() => setInput(input + suggestion + " ")}
-               >
-                 {suggestion}
-               </div>
-             ))}
-           </div>
+     <div className="flex gap-2 justify-around p-2 bg-gray-300 overflow-x-auto no-scrollbar">
+  {useCxtMode
+    ? suggestions.map((suggestion, index) => (
+        <div
+          key={index}
+          className={`text-sm px-2 py-1 max-w-xs border rounded shadow-md overflow-x-auto whitespace-nowrap cursor-pointer ${
+            index === 0 ? "bg-green-500 text-white" : "bg-white"
+          }`}
+          style={{ display: "inline-block" }}
+          title={suggestion}
+          onClick={async () => {
+            console.log(`Setting context mode to: ${suggestion}`);
+            const newContext = await setContextMode(suggestion);
+            if (newContext) {
+              console.log(`Context mode successfully updated to: ${newContext}`);
+              setSuggestions([]); // Close the suggestion box
+            } else {
+              console.error("Failed to update context mode");
+            }
+          }}
+        >
+          {suggestion}
+        </div>
+      ))
+    : suggestions.map((suggestion, index) => (
+        <div
+          key={index}
+          className="text-sm px-2 py-1 max-w-xs bg-white border rounded shadow-md overflow-x-auto whitespace-nowrap cursor-pointer"
+          style={{ display: "inline-block" }}
+          title={suggestion}
+          onClick={() => setInput(input + suggestion + " ")}
+        >
+          {suggestion}
+        </div>
+      ))}
+</div>
             {/* Keyboard Section */}
       <div className="bg-gray-200 p-1">
         <div className="flex justify-between mb-1">
