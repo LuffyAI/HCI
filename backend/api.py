@@ -118,7 +118,11 @@ def delete_messages():
     Deletes all messages from the in-memory store.
     """
     global messages
+    global suggestion_history
+    global all_suggestions
     messages.clear()
+    suggestion_history.clear()
+    all_suggestions = 0
     return {"status": "All messages have been deleted successfully!"}
 
 # Endpoint for suggesting word completions
