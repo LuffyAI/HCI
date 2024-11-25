@@ -7,10 +7,20 @@ import { Card } from "@/components/ui/card";
 import { ArrowUp, Delete, Keyboard, Lightbulb, Undo2 } from "lucide-react";
 
 const BASE_URL = "http://localhost:8000";
+const GPU_URL = "http://localhost:8000";
 let debounceTimeout: NodeJS.Timeout | null = null; // Timeout for debounce
 const DEBOUNCE_DELAY = 300; // Time in milliseconds to wait after typing
+let keystrokes: string[] = []; 
 
 const getSuggestions = (text: string, isWordCompletion: boolean): Promise<string[]> => {
+
+  const newKeystrokes = text.split(""); // Split `text` into individual characters
+
+  if (keystrokes.join("") !== text) {
+    // Only update if the current keystrokes do not match the text
+    keystrokes = newKeystrokes;
+  }
+  console.log("Keystrokes list:", keystrokes);
   return new Promise((resolve) => {
     if (debounceTimeout) {
       clearTimeout(debounceTimeout);
@@ -19,7 +29,7 @@ const getSuggestions = (text: string, isWordCompletion: boolean): Promise<string
     debounceTimeout = setTimeout(async () => {
       const endpoint = isWordCompletion ? "/suggest_word_completion" : "/suggest_next_word";
       try {
-        const response = await fetch(`${BASE_URL}${endpoint}`, {
+        const response = await fetch(`${GPU_URL}${endpoint}`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ text }),

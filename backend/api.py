@@ -9,10 +9,15 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from typing import List
 import asyncio
+from datetime import datetime
 from ai import ContextAgent
 
 app = FastAPI()
 Agent = ContextAgent()
+
+all_suggestions = 0
+
+recent_smart_suggestions = {}
 
 # Allow CORS for all origins (adjust in production)
 app.add_middleware(
@@ -29,14 +34,49 @@ generator = pipeline("text-generation", model="gpt2-medium")
 messages = []
 subscribers = []  # List of active connections
 context_mode = "Family"  # Default context mode
+suggestion_history = []
+
+
 
 
 class SuggestionRequest(BaseModel):
     text: str
 
+class SuggestionStat(BaseModel):
+    suggestion: str
+    used: bool  # Whether the suggestion was used in the message
+
+
 # Model for updating the context mode
 class ContextModeRequest(BaseModel):
     mode: str
+
+
+@app.post("/track_suggestion/")
+def track_suggestion(stat: SuggestionStat):
+    """
+    Tracks whether a suggestion was used in the user's message.
+    """
+    global suggestion_history
+    suggestion_history.append(stat.dict())
+    return {"status": "Suggestion tracked successfully!"}
+
+@app.get("/get_suggestion_stats/")
+def get_suggestion_stats():
+    """
+    Returns statistics on suggestion usage.
+    """
+    global suggestion_history
+    global all_suggestions
+    total_suggestions = len(suggestion_history)
+    used_suggestions = sum(1 for stat in suggestion_history if stat["used"])
+    unused_suggestions = total_suggestions - used_suggestions
+
+    return {
+        "total_suggestions": total_suggestions,
+        "total_number_of_suggestions": all_suggestions, 
+        "history": suggestion_history,
+    }
 
 @app.get("/get_context_mode/")
 def get_context_mode():
@@ -119,15 +159,37 @@ class Message(BaseModel):
 class ResponseMessage(BaseModel):
     sender: str
     text: str
+    timestamp: str
 
 @app.post("/send_message/")
 def send_message(message: Message):
     """
     Adds a new message to the in-memory store.
     """
+    global suggestion_history
+    global recent_smart_suggestions
+
     if not message.text.strip():
         raise HTTPException(status_code=400, detail="Message text cannot be empty.")
-    messages.append(message)
+    
+    message_with_timestamp = {
+        "sender": message.sender,
+        "text": message.text,
+        "timestamp": datetime.utcnow().isoformat()  # Generate current UTC time in ISO format
+    }
+    messages.append(message_with_timestamp)
+
+    # Check if the message text contains any suggestions
+
+    print("Recent Smart Suggestions:", recent_smart_suggestions)
+
+    if recent_smart_suggestions:
+        print("Recent Smart Suggestions:", recent_smart_suggestions)
+        for suggestion, used in recent_smart_suggestions.items():
+            if suggestion in message.text:
+                track_suggestion(SuggestionStat(suggestion=suggestion, used=True))
+                
+
     return {"status": "Message sent successfully!"}
 
 @app.get("/get_messages/")
@@ -152,6 +214,8 @@ def handle_lightbulb_click(payload: LightbulbPayload):
     Handles the lightbulb click and processes the payload.
     Calls OpenAI to simulate the contextually aware responses.
     """
+    global recent_smart_suggestions
+    global all_suggestions
     print("Received payload:", payload.dict())
     y = payload.dict()
     x = f"""
@@ -164,8 +228,18 @@ def handle_lightbulb_click(payload: LightbulbPayload):
         "suggestions": []
     }}
     """    
-    payload = {"suggestions": Agent.infer(x)}
-    print("Payload:", payload)
+    options = Agent.infer(x) 
+    all_suggestions += len(options)
+
+
+    for x in options:
+        recent_smart_suggestions[x]= False
+    print("Recent Smart Suggestions:", recent_smart_suggestions)
+
+
+    payload = {"suggestions": options}
+
+
     return payload 
 
 
@@ -176,6 +250,9 @@ def handle_checkmark_click(payload: LightbulbPayload):
     Handles the checkmark click and processes the payload.
     Calls OpenAI to simulate the contextually aware responses.
     """
+    global recent_smart_suggestions
+    global suggestion_history
+    global all_suggestions
     print("Received payload:", payload.dict())
     y = payload.dict()
     x = f"""
@@ -187,7 +264,21 @@ def handle_checkmark_click(payload: LightbulbPayload):
         "button_press": "Yellow",
         "suggestions": []
     }}
-    """    
-    payload = {"suggestions": Agent.infer(x)}
+    """ 
+    options = Agent.infer(x) 
+    all_suggestions += len(options)
+
+
+
+    for x in options:
+        recent_smart_suggestions[x]= False
+    print("Recent Smart Suggestions:", recent_smart_suggestions)
+
+
+    payload = {"suggestions": options}
+
+
+
+
     print("Payload:", payload)
     return payload 
