@@ -10,7 +10,8 @@ const BASE_URL = "http://localhost:8000";
 const GPU_URL = "http://localhost:8000";
 let debounceTimeout: NodeJS.Timeout | null = null; // Timeout for debounce
 const DEBOUNCE_DELAY = 300; // Time in milliseconds to wait after typing
-let keystrokes: string[] = []; 
+let keystrokes: string[] = [];
+let inputHistory: string[] = [];  
 
 const getSuggestions = (text: string, isWordCompletion: boolean): Promise<string[]> => {
 
@@ -19,8 +20,10 @@ const getSuggestions = (text: string, isWordCompletion: boolean): Promise<string
   if (keystrokes.join("") !== text) {
     // Only update if the current keystrokes do not match the text
     keystrokes = newKeystrokes;
+    inputHistory.push(text);
   }
   console.log("Keystrokes list:", keystrokes);
+  console.log("Input History:", inputHistory);
   return new Promise((resolve) => {
     if (debounceTimeout) {
       clearTimeout(debounceTimeout);
@@ -163,6 +166,16 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
     setInput(e.target.value);
   };
  
+  const areAnySmartSuggestionsActive = async (): Promise<boolean> => {
+    console.log("entered");
+    console.log("Lightbulb:", useLightbulbSuggestions);
+    return new Promise((resolve) => {
+      const result =
+        isLightbulbActive ||
+        isCheckMarkActive;
+      resolve(result);
+    });
+  };
   
   useEffect(() => {
     let polling = true; // Flag to control polling
@@ -409,7 +422,27 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
       handleCheckMarkClick();
     } else if (key === "👥") {
       handleContextClick();
-    }   
+    }  
+    else if (key === "↩ ") {
+     const current = inputHistory.pop() || "";
+     const target = inputHistory.pop() || ""
+
+     setInput(target);
+  
+      // Restore the cursor position
+      setTimeout(() => {
+        inputRef.current?.setSelectionRange(cursorPosition + 1, cursorPosition + 1);
+      });
+    } 
+    else if (key === "ENTER") {
+    setInput(input + "\n");
+
+    // Restore the cursor position
+    setTimeout(() => {
+      inputRef.current?.setSelectionRange(cursorPosition + 1, cursorPosition + 1);
+    });
+
+    }
 
     else {
       console.log("Key pressed:", key);
@@ -447,13 +480,13 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
     ["✔","q", "w", "e", "r", "t", "y", "u", "i", "o", "p"],
     ["a", "s", "d", "f", "g", "h", "j", "k", "l"],
     ["shift", "z", "x", "c", "v", "b", "n", "m", "backspace"],
-    ["123",":", "space", ".", "👥","↩ "],
+    ["123",":", "space", ".", "👥","↩ ", "ENTER"],
   ];
   const specialKeys = [
     ["+", "×", "÷", "=", "/", "_", "<", ">", "[", "]"],
     ["!", "@", "#", "$", "%", "^", "&", "*", "(", ")"],
     ["-", "'", "", ":", ";", ",", "?", "backspace"],
-    ["abc", ":", "space", ".", "👥", "↩"],
+    ["abc", ":", "space", ".", "👥", "↩", "ENTER"],
   ];
 
   const keys = isSpecialChar ? specialKeys : letterKeys;
@@ -494,6 +527,7 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
                    if (input.trim()) {
                      sendMessageAPI("user", input.trim());
                      setInput("");
+                     inputHistory = []
                    }
                  }}
                  className="ml-2 bg-blue-500 text-white p-2 rounded-md hover:bg-blue-600 focus:outline-none"
@@ -531,12 +565,15 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
           onClick={async () => {
             console.log(`Setting context mode to: ${suggestion}`);
             const newContext = await setContextMode(suggestion);
+           
             if (newContext) {
               console.log(`Context mode successfully updated to: ${newContext}`);
               setSuggestions([]); // Close the suggestion box
             } else {
               console.error("Failed to update context mode");
             }
+
+
           }}
         >
           {suggestion}
@@ -548,7 +585,27 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
           className="text-sm px-2 py-1 max-w-xs bg-white border rounded shadow-md overflow-x-auto whitespace-nowrap cursor-pointer"
           style={{ display: "inline-block" }}
           title={suggestion}
-          onClick={() => setInput(input + suggestion + " ")}
+          onClick={async () => {
+          
+          const smartstatus = areAnySmartSuggestionsActive();
+
+          if (useLightbulbSuggestions == true || useCheckMarkSuggestion == true)
+          {
+            setInput(suggestion + " ")
+            setUseLightbulbSuggestions(false);
+            setUseCheckMarkSuggestions(false);
+          }
+          else if (suggestion == "." || suggestion == "," || suggestion == "?" || suggestion == "!" || suggestion == ":")
+          {
+            setInput(input + suggestion)
+          }
+          else
+          {
+            setInput(input + " " + suggestion + " ")
+          }
+          console.log("Smart status:", smartstatus);  
+          console.log("Entered suggestion click event") 
+          }}
         >
           {suggestion}
         </div>
