@@ -409,11 +409,10 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
       handleCheckMarkClick();
     } else if (key === "👥") {
       handleContextClick();
-
-
     }   
 
     else {
+      console.log("Key pressed:", key);
       const newInput =
         input.slice(0, cursorPosition) +
         (isUpperCase ? key.toUpperCase() : key) +
@@ -596,11 +595,18 @@ const [isCxtModeActive, setCxtModeActive] = useState(false);
                     setIsUpperCase(!isUpperCase);
                   } else if (key === "123") {
                     setIsSpecialChar(true);
+                    console.log("Special Char mode activated");
                   } else if (key === "abc") {
                     setIsSpecialChar(false);
                   } else {
                     handleKeyPress(key);
                   }
+
+                  // Restore the cursor position
+                  const cursorPosition = inputRef.current?.selectionStart || 0;
+                  setTimeout(() => {
+                    inputRef.current?.setSelectionRange(cursorPosition + 1, cursorPosition + 1);
+                  });
                 }}
               >
                 {key === "backspace" ? (
